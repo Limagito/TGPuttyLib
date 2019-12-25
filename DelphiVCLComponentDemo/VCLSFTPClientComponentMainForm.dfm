@@ -2,7 +2,7 @@ object VCLSFTPClientComponentDemoForm: TVCLSFTPClientComponentDemoForm
   Left = 0
   Top = 0
   BorderStyle = bsDialog
-  Caption = 'VCL SFTP Client Component Demo'
+  Caption = 'TGPuttyLib VCL SFTP Client Component Demo'
   ClientHeight = 646
   ClientWidth = 864
   Color = clBtnFace
@@ -273,7 +273,7 @@ object VCLSFTPClientComponentDemoForm: TVCLSFTPClientComponentDemoForm
     OnClick = btMoveClick
   end
   object TGPuttySFTPClient1: TTGPuttySFTPClient
-    Port = 0
+    Port = 22
     Verbose = False
     OnSFTPMessage = TGPuttySFTPClient1SFTPMessage
     OnSFTPProgress = TGPuttySFTPClient1SFTPProgress

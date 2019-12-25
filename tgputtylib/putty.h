@@ -22,8 +22,15 @@
 #include "network.h"
 #include "misc.h"
 #include "marshal.h"
-
+#include "tgmem.h"
 // #define DEBUG_UPLOAD
+
+
+#define cBufferMaxFillSizeThresholdToAcceptMoreUploadData 1024*1024
+
+// with these flags, tgsftp_mvex can skip checking whether the destination is an existing folder
+#define cMoveFlag_DestinationPathIncludesItemName 1
+#define cMoveFlag_AddSourceItemNameToDestinationPath 2
 
 /*
  * We express various time intervals in unsigned long minutes, but may need to
@@ -501,7 +508,7 @@ struct BackendVtable {
                          const char *host, int port,
                          char **realhost, bool nodelay, bool keepalive);
 
-    void (*free) (Backend *be);
+    void (*freefunc) (Backend *be); // TG: allow to use #define free
     /* Pass in a replacement configuration. */
     void (*reconfig) (Backend *be, Conf *conf);
     /* send() returns the current amount of buffered data. */
@@ -537,7 +544,7 @@ static inline const char *backend_init(
     Conf *conf, const char *host, int port, char **rhost, bool nd, bool ka)
 { return vt->init(seat, out, logctx, conf, host, port, rhost, nd, ka); }
 static inline void backend_free(Backend *be)
-{ be->vt->free(be); }
+{ be->vt->freefunc(be); }
 static inline void backend_reconfig(Backend *be, Conf *conf)
 { be->vt->reconfig(be, conf); }
 static inline size_t backend_send(Backend *be, const char *buf, size_t len)
@@ -1496,10 +1503,23 @@ enum config_primary_key { CONFIG_OPTIONS(CONF_ENUM_DEF) N_CONFIG_OPTIONS };
 #define NCFGCOLOURS 22 /* number of colours in CONF_colours above */
 
 /* Functions handling configuration structures. */
+
+#ifdef DEBUG_MALLOC
+Conf *realconf_new(const char *filename,const int line);                  /* create an empty configuration */
+void realconf_free(Conf *conf,const char *filename,const int line);
+Conf *realconf_copy(Conf *oldconf,const char *filename,const int line);
+void realconf_copy_into(Conf *dest, Conf *src,const char *filename,const int line);
+#define conf_new() realconf_new(__FILE__,__LINE__)
+#define conf_free(x) realconf_free(x,__FILE__,__LINE__)
+#define conf_copy(x) realconf_copy(x,__FILE__,__LINE__)
+#define conf_copy_into(x,y) realconf_copy_into(x,y,__FILE__,__LINE__)
+#else
 Conf *conf_new(void);                  /* create an empty configuration */
 void conf_free(Conf *conf);
 Conf *conf_copy(Conf *oldconf);
 void conf_copy_into(Conf *dest, Conf *src);
+#endif
+
 /* Mandatory accessor functions: enforce by assertion that keys exist. */
 bool conf_get_bool(Conf *conf, int key);
 int conf_get_int(Conf *conf, int key);
@@ -2267,7 +2287,7 @@ typedef struct
   __int64 tag;
 
   bool (*ls_callback)(const struct fxp_names *names,const void *libctx);
-  char* (*getpassword_callback)(const char *prompt, const bool echo, const bool *cancel, const void *libctx);
+  const char* (*getpassword_callback)(const char *prompt, const bool echo, bool *cancel, const void *libctx);
   void (*printmessage_callback)(const char *msg, const bool isstderr, const void *libctx);
   bool (*progress_callback)(const uint64_t bytescopied, const bool isupload, const void *libctx);
   int (*read_from_stream)(const uint64_t offset,void *buffer,const int bufsize, const void *libctx);
@@ -2292,6 +2312,18 @@ typedef struct
   // static items from sftp.c
   const char *fxp_error_message; // accessed by host application too
   int fxp_errtype; // accessed by host application too
+
+#if defined(CALLBACK_MALLOC) || defined(DEBUG_MALLOC)
+  void* (*malloc_callback) (size_t size);
+  void (*free_callback) (void* ptr);
+  void* (*realloc_callback)(void *ptr, size_t new_size);
+
+  void* (*debug_malloc_callback) (size_t size,const char *filename,const int line);
+  void (*debug_free_callback) (void* ptr,const char *filename,const int line);
+  void* (*debug_realloc_callback)(void *ptr, size_t new_size,const char *filename,const int line);
+
+  bool usememorycallbacks;
+#endif
 
   // STRICTLY LIBRARY PRIVATE FIELDS FOLLOW
   tree234 *sftp_requests;
@@ -2345,14 +2377,19 @@ typedef struct
 
 extern __declspec(thread) TTGLibraryContext *curlibctx;
 
-#define printf(...) tgdll_print(dupprintf(__VA_ARGS__))
-#define fprintf(fp,...) tgdll_fprint(fp,dupprintf(__VA_ARGS__))
+#define printf(...) tgdll_printfree(dupprintf(__VA_ARGS__))
+#define fprintf(fp,...) tgdll_fprintfree(fp,dupprintf(__VA_ARGS__))
 #define fflush tgdll_fflush
 #define fwrite tgdll_fwrite
 #define fputs(msg,fp) fprintf(fp,"%s",msg)
 #define fputc(c,fp) fprintf(fp,"%c",c)
+
 int tgdll_print(const char *msg);
+int tgdll_printfree(char *msg);
+
 int tgdll_fprint(FILE *stream,const char *msg);
+int tgdll_fprintfree(FILE *stream,char *msg);
+
 int tgdll_fflush(FILE *stream);
 size_t tgdll_fwrite(const void *ptr,size_t size,size_t count,FILE *stream);
 void tgdll_assert(const char *msg,const char *filename,const int line);
